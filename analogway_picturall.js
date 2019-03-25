@@ -7,14 +7,14 @@ function instance(system, id, config) {
 	var self = this;
 
 	this.numPlaybacks = 8;
+	this.numLayers = 32; // number of layers can be changed by server configuration, this number is only for preset generation
 	this.firmwareVersion = "0";
 	this.numOutputs = 0;
 	this.numInputs = 0;
 	this.modelname = '';
 	this.cuestacks = [];
 	this.cuestackIDs = [];
-	this.laststackinfo = 0;
-	this.laststackinfoTimestamp = 0;
+	this.sourceplaystates = [];
 	this.objects = [{}];
 	this.objIds = [{}];
 
@@ -166,8 +166,26 @@ instance.prototype.init_tcp = function() {
 					if (matches) {
 						self.setVariable('source' + self.objects[obj].index + '_elapsed', formatTime(parseInt(matches[3]), 0));
 						self.setVariable('source' + self.objects[obj].index + '_countdown', formatTime( parseInt(matches[4])-parseInt(matches[3]), 0 ));
+						var ps = parseInt(matches[2]);
+						if (self.sourceplaystates[self.objects[obj].index] !== ps) {
+							self.sourceplaystates[self.objects[obj].index] = ps; // 0=Play 5=Pause 6=Stop
+							switch(ps) {
+								case '0':
+									self.setVariable('source' + self.objects[obj].index + '_playstate', 'Play');
+									break;
+								case '5':
+									self.setVariable('source' + self.objects[obj].index + '_playstate', 'Pause');
+									break;
+								case '6':
+									self.setVariable('source' + self.objects[obj].index + '_playstate', 'Stop');
+									break;
+								default:
+									self.setVariable('source' + self.objects[obj].index + '_playstate', '');
+									break;
+							}
+							self.checkFeedbacks('source_playstate');
+						}
 					}
-
 				}
 			}
 
@@ -366,7 +384,8 @@ instance.prototype.actions = function(system) {
 				choices: [
 					{ id: '0', label: 'Play' },
 					{ id: '5', label: 'Pause' },
-					{ id: '6', label: 'Stop' }
+					{ id: '6', label: 'Stop' },
+					{ id: 't', label: 'Toggle Play/Pause' }
 				]
 			}]
 		},
@@ -461,7 +480,14 @@ instance.prototype.action = function(action) {
 			break;
 
 		case 'layer_playback':
-			cmd = 'set source' + parseInt(action.options.layer).toString() + ' control play_state_req=' + parseInt(action.options.playstate).toString();
+			var ps = 6;
+			if (action.options.playstate === 't') {
+				if (self.sourceplaystates[parseInt(action.options.layer)] === 5 || self.sourceplaystates[parseInt(action.options.layer)] ===6) ps = 0;
+				else ps = 5;
+			}
+			else ps = parseInt(action.options.playstate);
+
+			cmd = 'set source' + parseInt(action.options.layer).toString() + ' control play_state_req=' + ps.toString();
 			break;
 
 		case 'layer_playback_seek':
@@ -563,6 +589,50 @@ instance.prototype.init_feedbacks = function() {
 		]
 	};
 
+	feedbacks['source_playstate'] = {
+		label: 'Change background with playstate',
+		description: 'Change colors of the bank when playstate of the selected source changes',
+		options: [
+			{
+				type: 'textinput',
+				label: 'Source',
+				id: 'source',
+				default: '1',
+				regex: '/^0*[1-9][0-9]*$/'
+			},{
+				type: 'dropdown',
+				label: 'Playstate for active colors',
+				id: 'playstate',
+				default: '0',
+				choices: [
+					{ id: '0', label: 'Play' },
+					{ id: '5', label: 'Pause' },
+					{ id: '6', label: 'Stop' }
+				]
+			},{
+				type: 'colorpicker',
+				label: 'Active foreground color',
+				id: 'goodfg',
+				default: self.rgb(0,0,0)
+			},{
+				type: 'colorpicker',
+				label: 'Active background color',
+				id: 'goodbg',
+				default: self.rgb(255,0,0)
+			},{
+				type: 'colorpicker',
+				label: 'Non active foreground color',
+				id: 'badfg',
+				default: self.rgb(0,0,0)
+			},{
+				type: 'colorpicker',
+				label: 'Non active background color',
+				id: 'badbg',
+				default: self.rgb(127,0,0)
+			}
+		]
+	};
+
 	self.setFeedbackDefinitions(feedbacks);
 };
 
@@ -582,6 +652,14 @@ instance.prototype.feedback = function(feedback, bank) {
 		}
 	}
 
+	if (feedback.type == 'source_playstate') {
+		if (this.sourceplaystates[opt.source] == opt.playstate) {
+			out = { color: opt.goodfg, bgcolor: opt.goodbg };
+		} else {
+			out = { color: opt.badfg, bgcolor: opt.badbg };
+		}
+	}
+
 	return out;
 };
 
@@ -589,6 +667,7 @@ instance.prototype.feedback = function(feedback, bank) {
 instance.prototype.init_presets = function () {
 	var self = this;
 	var presets = [];
+	var myname = self.label;
 
 	for (var pb = 1; pb <= this.numPlaybacks; pb++) {
 		presets.push({
@@ -609,12 +688,12 @@ instance.prototype.init_presets = function () {
 					}
 				}
 			]
-		},{
+		}, {
 			category: 'Playbacks with Cuestatus',
 			label: 'Go button for playback ' + pb,
 			bank: {
 				style: 'text',
-				text: 'GO ' + pb + '\\n$(Picturall:playback' + pb + '_cuestack) : $(Picturall:playback' + pb + '_cue)',
+				text: 'GO ' + pb + '\\n$(' +myname+ ':playback' + pb + '_cuestack) : $(' +myname+ ':playback' + pb + '_cue)',
 				size: 'auto',
 				color: 0,
 				bgcolor: self.rgb(255, 0, 0)
@@ -641,8 +720,106 @@ instance.prototype.init_presets = function () {
 			]
 		});
 
+		for (var la = 1; la <= this.numLayers; la++) {
+			presets.push({
+				category: 'Sources',
+				label: 'Play button for source ' + la,
+				bank: {
+					style: 'text',
+					text: '⏵ ' + la + '\\n$(' +myname+ ':source' + la + '_elapsed)',
+					size: '18',
+					color: 0,
+					bgcolor: self.rgb(255, 0, 0)
+				},
+				actions: [
+					{
+						action: 'layer_playback',
+						options: {
+							layer: la,
+							playstate: 0
+						}
+					}
+				],
+				feedbacks: [
+					{
+						type: 'source_playstate',
+						options: {
+							source: la,
+							playstate: '0',
+							goodbg: self.rgb(255, 0, 0),
+							goodfg: self.rgb(0, 0, 0),
+							badbg: self.rgb(127, 0, 0),
+							badfg: self.rgb(0, 0, 0)
+						}
+					}
+				]
+			}, {
+				category: 'Sources',
+				label: 'Pause button for source ' + la,
+				bank: {
+					style: 'text',
+					text: '⏸ ' + la,
+					size: '18',
+					color: 0,
+					bgcolor: self.rgb(255, 0, 0)
+				},
+				actions: [
+					{
+						action: 'layer_playback',
+						options: {
+							layer: la,
+							playstate: 5
+						}
+					}
+				],
+				feedbacks: [
+					{
+						type: 'source_playstate',
+						options: {
+							source: la,
+							playstate: '5',
+							goodbg: self.rgb(255, 0, 0),
+							goodfg: self.rgb(0, 0, 0),
+							badbg: self.rgb(127, 0, 0),
+							badfg: self.rgb(0, 0, 0)
+						}
+					}
+				]
+			}, {
+				category: 'Sources',
+				label: 'Stop button for source ' + la,
+				bank: {
+					style: 'text',
+					text: '⏹ ' + la + '\\n$(' +myname+ ':source' + la + '_countdown)',
+					size: '18',
+					color: 0,
+					bgcolor: self.rgb(255, 0, 0)
+				},
+				actions: [
+					{
+						action: 'layer_playback',
+						options: {
+							layer: la,
+							playstate: 6
+						}
+					}
+				],
+				feedbacks: [
+					{
+						type: 'source_playstate',
+						options: {
+							source: la,
+							playstate: '6',
+							goodbg: self.rgb(255, 0, 0),
+							goodfg: self.rgb(0, 0, 0),
+							badbg: self.rgb(127, 0, 0),
+							badfg: self.rgb(0, 0, 0)
+						}
+					}
+				]
+			});
+		}
 	}
-
 	this.setPresetDefinitions(presets);
 };
 
