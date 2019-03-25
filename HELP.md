@@ -31,6 +31,9 @@ You only have to enter the part AFTER the "-->"
 There is a variable for the server software version. Although the server can only be controlled by the Pictuall Commander with a matching software version, the Companion module should work with all server versions known today.
 There are variables for each playback indicating the state of the playback. The x_cuestack variable indicates if a cuestack is selected in the playback. It reads "0" if none or the number of the selected cuestack. The x_cue variable indicates the active cue of the cuestack in the playback. It reads "0" if none or the number of the active cue.
 
+There are some variables which are not exposed in the instance configuration. You can use them with $(INSTANCENAME:sourceX_elapsed) and $(INSTANCENAME:sourceX_countdown)
+You have to replace INSTANCENAME with the name of your instance and X with the number of the source. As soon as you first play a media in that source these variables will show the location of the playhead and and a countdown to the end.
+
 **Available presets for Analog Way Picturall**
 There are presets for the Go actions for all playbacks.
 

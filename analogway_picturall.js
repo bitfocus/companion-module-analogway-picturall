@@ -11,10 +11,12 @@ function instance(system, id, config) {
 	this.numOutputs = 0;
 	this.numInputs = 0;
 	this.modelname = '';
-	this.cuestacks = [0,0,0,0,0,0,0,0,0];
-	this.cuestackIDs = [0,0,0,0,0,0,0,0,0];
+	this.cuestacks = [];
+	this.cuestackIDs = [];
 	this.laststackinfo = 0;
 	this.laststackinfoTimestamp = 0;
+	this.objects = [{}];
+	this.objIds = [{}];
 
 	// super-constructor
 	instance_skel.apply(this, arguments);
@@ -24,6 +26,24 @@ function instance(system, id, config) {
 	return self;
 }
 
+function setControlState(idx,ctrlstate) {
+	var self = this;
+	self.objects[idx] = ctrlstate;
+}
+
+function formatTime(time, divisions = 10) {
+	// divisions is how many frames are in one second, 1000=ms, 0=none
+	var h,m,s,ret;
+	time /= 1000000; //make milliseconds out of nanoseconds
+	h = Math.floor(time / 3600000);
+	m = Math.floor(time%3600000 / 60000);
+	s = Math.floor(time%60000 / 1000);
+	ret = [h,m,s].join(':');
+	if (divisions !=0) {
+		ret += '.' + Math.round(time%1000 / divisions);
+	}
+	return ret;
+}
 
 instance.prototype.init = function() {
 	var self = this;
@@ -78,14 +98,18 @@ instance.prototype.init_tcp = function() {
 		});
 
 		self.socket.on('receiveline', function (line) {
-			debug("Received line from Picturall:", line);
+			//use this debug only for debugging!
+			//debug("Received line from Picturall:", line);
 
 			if (line.match(/Show running!/)) {
 				// now it is ready
 				self.status(this.STATE_OK);
-				self.sendcmd("config");
+				self.sendcmd("log all"); // switch on human readable messages
+				self.sendcmd("config"); // request some server information
+				self.sendcmd("receiving all"); // switch on machine readable messages
+				self.sendcmd("enum_objects"); // request the list of server objects (layers, stacks...) and their IDs
 				for(var i=1; i<9; i++) {
-					self.sendcmd('ctrl_status stack'+i);
+					self.sendcmd('ctrl_status stack'+i); // request the status of the stacks
 				}
 			}
 
@@ -93,36 +117,90 @@ instance.prototype.init_tcp = function() {
 				this.firmwareVersion = line.match(/config->version=([\d\.]+)/)[1];
 				self.log('info', self.config.label +" software version is "+ this.firmwareVersion);
 				self.setVariable('software_version', this.firmwareVersion);
+				self.sendcmd("log none"); // switch off human readable messages
 			}
 
-			if (line.match(/Control status for stack\d+:/)) {
-				// it seems we are soon getting info about a playback
-				this.laststackinfo = parseInt(line.match(/Control status for stack(\d+)/)[1]);
-				this.laststackinfoTimestamp = parseInt('' + line.match(/(\d+)\.\d\d\d\d/)[1] + line.match(/\.(\d\d\d\d)/)[1]);
+			if (line.match(/MSG\(\d+, \d+, 15, .+\)/)) {
+				//I receive a enum of all objects
+				var enums = line.match(/MSG\(\d+, \d+, 15, (.+)\)/)[1];
+				var pairs = enums.split(/\\n/);
+				pairs.forEach(function(pair){
+					var objId = pair.split(':')[0];
+					var obNam = pair.split(':')[1];
+					self.objects[objId] = { 'objname': obNam };
+					if(obNam !== undefined && obNam.match(/audio|layer|stack|source/)) {
+						var objType = obNam.match(/([a-zA-Z]+)/)[1];
+						var objIndex = parseInt(obNam.match(/(\d+$)/)[1]);
+						self.objects[objId].type = objType;
+						self.objects[objId].index = objIndex;
+						if (self.objIds[objType] === undefined) {
+							self.objIds[objType] = [];
+						}
+						self.objIds[objType][objIndex] = parseInt(objId);
+					}
+				});
 			}
 
-			if (line.match(/select cue_stack=\d+,major=\d+,minor=\d+/)) {
-				// here is the info about a playback, but for which one?
-				var timestamp = parseInt('' + line.match(/(\d+)\.\d\d\d\d/)[1] + line.match(/\.(\d\d\d\d)/)[1]);
-				if (Math.abs(timestamp - this.laststackinfoTimestamp) < 20) { // only accept info if last header is not older than 20ms
-					var cs = line.match(/cue_stack=(\d+),/)[1];
-					self.setVariable('playback' +this.laststackinfo+ '_cuestack', cs);
-					self.setVariable('playback' +this.laststackinfo+ '_cue', line.match(/major=(\d+),/)[1] + '.' + line.match(/minor=(\d+)/)[1]);
-					self.cuestacks[this.laststackinfo] = cs;
-					self.checkFeedbacks('playback_empty');
+			if (line.match(/MSG\(\d+, \d+, 13, .+\)/)) {
+
+				// I receive a control status, first let's get the object id sending the message
+				var obj = line.match(/MSG\(\d+, (\d+), 13, .+\)/)[1];
+
+				// Now let's check if we are interested in the message of this object
+				if (self.objects[obj].type === 'stack') {
+
+					// here we get the selected cuestack and cue
+					var matches = line.match(/select cue_stack=(\d+),major=(\d+),minor=(\d+)/);
+					if (matches) {
+						self.setVariable('playback' + self.objects[obj].index + '_cuestack', matches[1]);
+						self.setVariable('playback' + self.objects[obj].index + '_cue', matches[2] + '.' + matches[3]);
+						self.cuestacks[self.objects[obj].index] = matches[1];
+						self.checkFeedbacks('playback_empty');
+					}
+
+				}
+				if (self.objects[obj].type === 'source') {
+
+					// here we get the media infos
+					var matches = line.match(/info media_file="([^"]*)",play_state=(\d+),timecode=(\d+),media_length=(\d+)\)/);
+					if (matches) {
+						self.setVariable('source' + self.objects[obj].index + '_elapsed', formatTime(parseInt(matches[3]), 0));
+						self.setVariable('source' + self.objects[obj].index + '_countdown', formatTime( parseInt(matches[4])-parseInt(matches[3]), 0 ));
+					}
+
 				}
 			}
 
-			if (line.match(/\[stack[1-8]\]:\s+select\s+\(current\):\s+stack:\s+\d+\s+\(\d+\),\s+cue:\s+\d+\.\d+\s+\(\d+\.\d+\)/)) {
-				//something changed in the playbacks
-				var playback = line.match(/\[stack([1-8])\]:/)[1];
-				self.sendcmd('ctrl_status stack'+playback);
+			if (line.match(/MSG\(\d+, \d+, 32, .+\)/)) {
+
+				// I receive a mysterious #32 message
+				var obj = line.match(/MSG\(\d+, (\d+), 32, .+\)/)[1];
+
+				// Now let's check if we are interested in the message of this object, atm we are only looking for stacks
+				if (self.objects[obj].type === 'stack') {
+
+					// here we get some info about the playback state
+					matches = line.match(/state="(.*?)", progress=(\d+\.\d+), timing=(\d+\.\d+)\/(\d+\.\d+)\/(\d+\.\d+)/);
+					if (matches) {
+						self.setVariable('playback' + self.objects[obj].index + '_state', matches[1]);
+						if (parseFloat(matches[4]) !== 0 ) {
+							self.setVariable('playback' + self.objects[obj].index + '_progress', Math.round(100.0 * parseFloat(matches[2]) / parseFloat(matches[4])).toString() + '%');
+						}
+						else {
+							self.setVariable('playback' + self.objects[obj].index + '_progress', parseFloat(matches[2]) + '%');
+						}
+					}
+				}
 			}
 
-			if (line.match(/\[stack[1-8]\]:.+trigger/i)) {
-				//something changed in the playbacks
-				var playback = line.match(/\[stack([1-8])\]:/)[1];
-				self.sendcmd('ctrl_status stack'+playback);
+			if (line.match(/MSG\(\d+, \d+, 31, source="stack\d+\.select\.cue_stack".+\)/)) {
+
+				// I receive a mysterious #31 message, seems somebody has changed the cuestack
+				var stack = parseInt(line.match(/MSG\(\d+, \d+, 31, source="stack(\d+)\.select\.cue_stack".+\)/)[1]);
+
+				if (stack > 0) {
+					self.sendcmd('ctrl_status stack'+stack); // better to request a status then trying to map cuestack IDs
+				}
 			}
 
 			if (line.match(/Unknown command: ".+?"/)) {
@@ -177,9 +255,15 @@ instance.prototype.init_variables = function() {
 			{
 				label: 'Cue Stack in Playback ' + pb,
 				name: 'playback' + pb + '_cuestack'
-			}, {
+			},{
 				label: 'Active Cue in Playback ' + pb,
 				name: 'playback' + pb + '_cue'
+			},{
+				label: 'Transition State of Playback ' + pb,
+				name: 'playback' + pb + '_state'
+			},{
+				label: 'Fade Progress of Playback ' + pb,
+				name: 'playback' + pb + '_progress'
 			}
 		);
 	}
@@ -190,6 +274,8 @@ instance.prototype.init_variables = function() {
 	for (var pb = 1; pb <= this.numPlaybacks; pb++) {
 		self.setVariable('playback' +pb+ '_cuestack', 'unknown');
 		self.setVariable('playback' +pb+ '_cue', 'unknown');
+		self.setVariable('playback' +pb+ '_state', 'unknown');
+		self.setVariable('playback' +pb+ '_progress', '0%');
 	}
 
 };
