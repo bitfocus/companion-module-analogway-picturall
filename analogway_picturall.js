@@ -202,7 +202,7 @@ instance.prototype.init_tcp = function() {
 					if (matches) {
 						self.setVariable('playback' + self.objects[obj].index + '_state', matches[1]);
 						if (parseFloat(matches[4]) !== 0 ) {
-							self.setVariable('playback' + self.objects[obj].index + '_progress', Math.round(100.0 * parseFloat(matches[2]) / parseFloat(matches[4])).toString() + '%');
+							self.setVariable('playback' + self.objects[obj].index + '_progress', Math.round(100.0 * Math.min(parseFloat(matches[2]) / parseFloat(matches[4]), 1)).toString() + '%');
 						}
 						else {
 							self.setVariable('playback' + self.objects[obj].index + '_progress', parseFloat(matches[2]) + '%');
@@ -472,7 +472,8 @@ instance.prototype.action = function(action) {
 			break;
 
 		case 'playback_selectcuestack':
-			cmd = 'set stack'+ parseInt(action.options.playback).toString() +' select cue_stack=' + parseInt(action.options.cuestack).toString();
+			cmd = 'set stack'+ parseInt(action.options.playback).toString() +' select cue_stack=' + parseInt(action.options.cuestack).toString() + 'major=0 minor=0';
+
 			break;
 
 		case 'playback_release':
