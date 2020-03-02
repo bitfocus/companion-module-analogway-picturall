@@ -1,1 +1,2 @@
-companion-module-analogway_picturall
+# companion-module-analogway-picturall
+See HELP.md and LICENSE
