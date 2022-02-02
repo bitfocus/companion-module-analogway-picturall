@@ -1,19 +1,27 @@
 {
-  "name": "analogway-picturall",
-  "version": "1.2.2",
-  "api_version": "1.0.0",
-  "keywords": [
-    "Protocol",
-    "Media Server"
-  ],
-  "manufacturer": "Analog Way",
-  "product": "Picturall Media Server",
-  "shortname": "Picturall",
-  "description": "Analog Way Picturall Media Server plugin for Companion",
-  "main": "analogway_picturall.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "Dorian Meid <meid@backstage.org>",
-  "license": "ISC"
+	"name": "analogway-picturall",
+	"version": "1.2.2",
+	"api_version": "1.0.0",
+	"keywords": [
+		"Protocol",
+		"Media Server"
+	],
+	"manufacturer": "Analog Way",
+	"product": "Picturall Media Server",
+	"shortname": "Picturall",
+	"description": "Analog Way Picturall Media Server plugin for Companion",
+	"main": "analogway_picturall.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"author": "Dorian Meid <meid@backstage.org>",
+	"license": "ISC",
+	"homepage": "https://github.com/bitfocus/companion-module-analogway-picturall#readme",
+	"bugs": {
+		"url": "https://github.com/bitfocus/companion-module-analogway-picturall/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/bitfocus/companion-module-analogway-picturall.git"
+	}
 }
