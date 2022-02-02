@@ -300,7 +300,7 @@ instance.prototype.init_variables = function() {
 
 instance.prototype.actions = function(system) {
 	var self = this;
-	self.system.emit('instance_actions', self.id, {
+	self.setActions({
 
 		'run_cue': {
 			label: 'Run Cue',
