@@ -684,7 +684,7 @@ class Picturall extends InstanceBase {
 			this.socket.on('data', (chunk) => {
 				let i = 0, line = ''
 				receivebuffer += chunk
-				if (receivebuffer.length > 30000) {
+				if (receivebuffer.length > 64000) {
 					this.log('warn', 'Receive buffer overflow, flushing')
 					receivebuffer = ''
 				}
@@ -725,16 +725,20 @@ class Picturall extends InstanceBase {
 					pairs.forEach((pair) => {
 						let objId = pair.split(':')[0]
 						let obNam = pair.split(':')[1]
-						this.objects[objId] = { 'objname': obNam }
-						if(obNam !== undefined && obNam.match(/^(audio|layer|stack|source)/)) {
-							let objType = obNam.match(/([a-zA-Z]+)/)[1]
-							let objIndex = parseInt(obNam.match(/(\d+$)/)[1])
-							this.objects[objId].type = objType
-							this.objects[objId].index = objIndex
-							if (this.objIds[objType] === undefined) {
-								this.objIds[objType] = []
+						if (objId && obNam) {
+							this.objects[objId] = { 'objname': obNam }
+							if(obNam !== undefined && obNam.match(/^(audio|layer|stack|source)/)) {
+								let objType = obNam.match(/([a-zA-Z]+)/)[1]
+								let objIndex = parseInt(obNam.match(/(\d+$)/)[1])
+								this.objects[objId].type = objType
+								this.objects[objId].index = objIndex
+								if (this.objIds[objType] === undefined) {
+									this.objIds[objType] = []
+								}
+								this.objIds[objType][objIndex] = parseInt(objId);
 							}
-							this.objIds[objType][objIndex] = parseInt(objId);
+						} else {
+							this.log('error', `Received malformed object description '${pair}'`)
 						}
 					})
 				}
@@ -743,82 +747,93 @@ class Picturall extends InstanceBase {
 
 					// I receive a control status, first let's get the object id sending the message
 					let [_all, objId, ctrlParam] = line.match(/MSG\(\d+, (\d+), 13, (.+)\)/)
-					const objname = this.objects[objId].objname
+					const obj = this.objects[objId]
+					if (obj) { 
+						const objname = obj.objname
 
-					// store for learn button if it is not a time message
-					if (objname !== 'wallclock') {
-						this.lastcmd.object = this.objects[objId].objname
-						this.lastcmd.ctrlParam = ctrlParam
-					}
-
-					// Now let's check if we are interested in the message of this object
-					if (this.objects[objId].type === 'stack') {
-
-						// here we get the selected cuestack and cue
-						let matches = line.match(/select cue_stack=(\d+),major=(\d+),minor=(\d+)/);
-						if (matches) {
-							this.setVariableValues({
-								['playback' + this.objects[objId].index + '_cuestack']: matches[1],
-								['playback' + this.objects[objId].index + '_cue']: matches[2] + '.' + matches[3]
-							})
-							this.cuestacks[this.objects[objId].index] = matches[1]
-							this.checkFeedbacks('playback_empty')
+						// store for learn button if it is not a time message
+						if (objname !== 'wallclock') {
+							this.lastcmd.object = objname
+							this.lastcmd.ctrlParam = ctrlParam
 						}
 
-					}
-					if (this.objects[objId].type === 'source') {
+						// Now let's check if we are interested in the message of this object
+						if (obj.type === 'stack') {
 
-						// here we get the media infos
-						let matches = line.match(/info media_file="([^"]*)",play_state=(\d+),timecode=(\d+),media_length=(\d+)\)/);
-						if (matches) {
-							this.setVariableValues({
-								['source' + this.objects[objId].index + '_elapsed']: this.formatTime(parseInt(matches[3]), 0),
-								['source' + this.objects[objId].index + '_countdown']: this.formatTime(parseInt(matches[4]) - parseInt(matches[3]), 0)
-							})
-							let ps = parseInt(matches[2])
-							if (this.sourceplaystates[this.objects[objId].index] !== ps) {
-								this.sourceplaystates[this.objects[objId].index] = ps; // 0=Play 5=Pause 6=Stop
-								switch(ps) {
-									case '0':
-										this.setVariableValues({['source' + this.objects[objId].index + '_playstate']: 'Play'})
-										break
-									case '5':
-										this.setVariableValues({['source' + this.objects[objId].index + '_playstate']: 'Pause'})
-										break
-									case '6':
-										this.setVariableValues({['source' + this.objects[objId].index + '_playstate']: 'Stop'})
-										break
-									default:
-										this.setVariableValues({['source' + this.objects[objId].index + '_playstate']: ''})
-										break
+							// here we get the selected cuestack and cue
+							let matches = line.match(/select cue_stack=(\d+),major=(\d+),minor=(\d+)/);
+							if (matches) {
+								this.setVariableValues({
+									['playback' + obj.index + '_cuestack']: matches[1],
+									['playback' + obj.index + '_cue']: matches[2] + '.' + matches[3]
+								})
+								this.cuestacks[obj.index] = matches[1]
+								this.checkFeedbacks('playback_empty')
+							}
+
+						}
+						if (obj.type === 'source') {
+
+							// here we get the media infos
+							let matches = line.match(/info media_file="([^"]*)",play_state=(\d+),timecode=(\d+),media_length=(\d+)\)/);
+							if (matches) {
+								this.setVariableValues({
+									['source' + obj.index + '_elapsed']: this.formatTime(parseInt(matches[3]), 0),
+									['source' + obj.index + '_countdown']: this.formatTime(parseInt(matches[4]) - parseInt(matches[3]), 0)
+								})
+								let ps = parseInt(matches[2])
+								if (this.sourceplaystates[obj.index] !== ps) {
+									this.sourceplaystates[obj.index] = ps; // 0=Play 5=Pause 6=Stop
+									switch(ps) {
+										case '0':
+											this.setVariableValues({['source' + obj.index + '_playstate']: 'Play'})
+											break
+										case '5':
+											this.setVariableValues({['source' + obj.index + '_playstate']: 'Pause'})
+											break
+										case '6':
+											this.setVariableValues({['source' + obj.index + '_playstate']: 'Stop'})
+											break
+										default:
+											this.setVariableValues({['source' + obj.index + '_playstate']: ''})
+											break
+									}
+									this.checkFeedbacks('source_playstate')
 								}
-								this.checkFeedbacks('source_playstate')
 							}
 						}
+					} else {
+						this.log('error', `Received #13 control status ${ctrlParam} for id ${objId}, but can't find this object.`)
 					}
 				}
 
 				if (line.match(/MSG\(\d+, \d+, 32, .+\)/)) {
 
 					// I receive a mysterious #32 message
-					let obj = line.match(/MSG\(\d+, (\d+), 32, .+\)/)[1]
+					let objId = line.match(/MSG\(\d+, (\d+), 32, .+\)/)[1]
 
-					// Now let's check if we are interested in the message of this object, atm we are only looking for stacks
-					if (this.objects[obj].type === 'stack') {
+					const obj = this.objects[objId]
+						if (obj) {
 
-						// here we get some info about the playback state
-						let matches = line.match(/state="(.*?)", progress=(\d+\.\d+), timing=(\d+\.\d+)\/(\d+\.\d+)\/(\d+\.\d+)/)
-						if (matches) {
-							this.setVariableValues({['playback' + this.objects[obj].index + '_state']: matches[1]})
-							if (parseFloat(matches[4]) !== 0 ) {
-								this.setVariableValues({
-									['playback' + this.objects[obj].index + '_progress']: Math.round(100.0 * Math.min(parseFloat(matches[2]) / parseFloat(matches[4]), 1)).toString() + '%'
-								})
-							}
-							else {
-								this.setVariableValues({['playback' + this.objects[obj].index + '_progress']: parseFloat(matches[2]) + '%'})
+						// Now let's check if we are interested in the message of this object, atm we are only looking for stacks
+						if (obj.type === 'stack') {
+
+							// here we get some info about the playback state
+							let matches = line.match(/state="(.*?)", progress=(\d+\.\d+), timing=(\d+\.\d+)\/(\d+\.\d+)\/(\d+\.\d+)/)
+							if (matches) {
+								this.setVariableValues({['playback' + obj.index + '_state']: matches[1]})
+								if (parseFloat(matches[4]) !== 0 ) {
+									this.setVariableValues({
+										['playback' + obj.index + '_progress']: Math.round(100.0 * Math.min(parseFloat(matches[2]) / parseFloat(matches[4]), 1)).toString() + '%'
+									})
+								}
+								else {
+									this.setVariableValues({['playback' + obj.index + '_progress']: parseFloat(matches[2]) + '%'})
+								}
 							}
 						}
+					} else {
+						this.log('error', `Received #32 control status ${ctrlParam} for id ${objId}, but can't find this object.`)
 					}
 				}
 
